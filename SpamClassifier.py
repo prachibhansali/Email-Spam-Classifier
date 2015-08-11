@@ -2,10 +2,11 @@
 import os
 from bs4 import BeautifulSoup
 from elasticsearch import Elasticsearch
+from email import *
+from email.message import Message
+
 labels = {}
 labelsf = {}
-trainingset = {}
-testset = {}
 words = {}
 	
 def indexEmails():
@@ -44,24 +45,34 @@ def indexEmails():
 				trainf.write(str(doc_count)+"\n")
 			else:
 				testf.write(str(doc_count)+"\n")
-
-			soup = BeautifulSoup(f,'html.parser')
+			text = ""
+			msg = message_from_file(f)
+			if msg.is_multipart():
+				text = extract_body(msg.get_payload())
+			else:
+				text = msg.get_payload()
 			es = Elasticsearch()
 			doc = {
-				'text' : soup.get_text(),
+				'text' : text.decode('latin-1').encode("utf-8").lower(),
 				'label' : labels[filename],
 				'filename' : filename,
 				'split' : label
 			}
 			res = es.index(index="email_index",doc_type="document",id=doc_count,body=doc)
 			lab.write(str(doc_count) + " " + labels[filename] + "\n")
-			print(res['created'])
+			#print(res['created'])
 			doc_count = doc_count + 1
 	return doc_count
 
 # scan document to get all unigrams
 
 # read labels form file
+
+def extract_body(payload):
+    if isinstance(payload,str):
+        return payload
+    else:
+        return '\n'.join([extract_body(part.get_payload()) for part in payload])
 
 def readLabels():
 	f= open('labels','r')
@@ -72,36 +83,39 @@ def readLabels():
 		elif val=="ham\n":
 			labelsf[int(key)] = 1
 
-def readTrainingIds():
-	train = open('train.txt','r')
-	for line in train:
-		trainingset[int(line.rstrip())]=True
+# def readTrainingIds():
+# 	train = open('train.txt','r')
+# 	for line in train:
+# 		trainingset[int(line.rstrip())]=True
 
-def readTestIds():
-	test = open('test.txt','r')
-	for line in test:
-		testset[int(line.rstrip())]=True
+# def readTestIds():
+# 	test = open('test.txt','r')
+# 	for line in test:
+# 		testset[int(line.rstrip())]=True
 
 
 def fetchTrainingUnigrams():
 	f = open('features','w')
 	train_model = open('training_model','w')
+	trainingset = open('train.txt','r')
 	output = ""
 	index = 0;
-	for i in trainingset:
-		print i
+	for line in trainingset:
+		i = int(line.rstrip())
 		es = Elasticsearch()
+		print i
 		res = es.termvector(index="email_index",doc_type="document",id=i)
-		terms = res['term_vectors']['text']
 		output = str(labelsf[i]) + " ";
-		for key in terms['terms']:
-			if key in words:
-				print "found"
-			else:
-				words[key]=index
-				f.write(key.encode('utf-8')+" "+str(index) + "\n") 
-				index = index+1
-			output = output + str(words[key]) +":"+str(terms['terms'][key]['term_freq']) + " "
+		if(len(res['term_vectors'])!=0):
+			terms = res['term_vectors']['text']
+			for key in terms['terms']:
+				if key in words:
+					print "found"
+				else:
+					words[key]=index
+					f.write(key.encode('utf-8')+" "+str(index) + "\n") 
+					index = index+1
+				output = output + str(words[key]) +":"+str(terms['terms'][key]['term_freq']) + " "
 		train_model.write(output)
 		train_model.write("\n")
 	print "Length of the training set "
@@ -116,33 +130,34 @@ def createFeatures():
 
 def createFeatureMatrixForTest():
 	test_model = open('test_model','w')
+	testset = open('test.txt','r')
 	output = ""
 	index = 0;
-	for i in testset:
-		print "test set : ",i
+	for line in testset:
+		i = int(line.rstrip())
+		print i
 		es = Elasticsearch()
 		res = es.termvector(index="email_index",doc_type="document",id=i)
-		terms = res['term_vectors']['text']
 		output = str(labelsf[i]) + " ";
-		for key in terms['terms']:
-			if key in words:
-				output = output + str(words[key]) +":"+str(terms['terms'][key]['term_freq']) + " "
+		if(len(res['term_vectors'])!=0):
+			terms = res['term_vectors']['text']
+			for key in terms['terms']:
+				if key in words:
+					output = output + str(words[key]) +":"+str(terms['terms'][key]['term_freq']) + " "
 		test_model.write(output)
 		test_model.write("\n")
 	print "Length of the test set "
-	print len(testset)
+	#print len(testset)
 
 
 
-# doc_count = indexEmails()
-# f = open('doccount','w')
-# f.write(str(doc_count))
-# f.close()
-# readTrainingIds()
-createFeatures()
-readTestIds()
+#doc_count = indexEmails()
+#readTrainingIds()
 readLabels()
-# fetchTrainingUnigrams()
+#fetchTrainingUnigrams()
+createFeatures()
+#readTestIds()
+
 createFeatureMatrixForTest()	
 
 
